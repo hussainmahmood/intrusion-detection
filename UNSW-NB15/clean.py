@@ -1,52 +1,109 @@
-import time
-import pandas as pd
+import time, pandas as pd, numpy as np 
+from sklearn.preprocessing import MinMaxScaler, OrdinalEncoder, OneHotEncoder
+from imblearn.over_sampling import SMOTE, RandomOverSampler
+from imblearn.under_sampling import NearMiss 
 from src.config import BASE_DIR
 
 def clean():
-    df_train = pd.read_csv(BASE_DIR / 'UNSW-NB15/data/UNSW_NB15_training-set.csv')
-    df_test = pd.read_csv(BASE_DIR / 'UNSW-NB15/data/UNSW_NB15_testing-set.csv')
+    df_train = pd.read_csv(BASE_DIR / 'UNSW-NB15/data/UNSW_NB15_training-set.csv', na_values="-")
+    df_test = pd.read_csv(BASE_DIR / 'UNSW-NB15/data/UNSW_NB15_testing-set.csv', na_values="-")
 
     del df_train["id"]
     del df_test["id"]
 
-    print(f"{df_train.shape = }")
     print(df_train.columns)
-    print(df_train.dtypes)
-    print(df_train["proto"].unique())
-    print(len(df_train["proto"].unique()))
-    print([proto for proto in df_test["proto"].unique() if proto not in df_train["proto"].unique()])
-    print(len(df_test["proto"].unique()))
-    print(df_train["state"].unique())
-    print(len(df_train["state"].unique()))
-    print([state for state in df_test["state"].unique() if state not in df_train["state"].unique()])
-    print(len(df_test["state"].unique()))
-    print(df_train["attack_cat"].unique())
-    print(len(df_train["attack_cat"].unique()))
-    print([attack_cat for attack_cat in df_test["attack_cat"].unique() if attack_cat not in df_train["attack_cat"].unique()])
-    print(len(df_test["attack_cat"].unique()))
+
+    print(len(df_train.columns.difference(["service", "proto", "state", "attack_cat", "label"])))
     
-    # print(df_train["proto"].head())
-    # print(df_test["proto"].head())
+
+    for column in df_train.columns:
+        print(f"{column}: {df_train[column].isnull().sum()}")
+        print(f"{column}: {df_test[column].isnull().sum()}")
+    
+    for column in ("proto", "state", "service"):
+        print(df_train[column].value_counts())
+
+    numeric_cols = df_train.columns.difference(["service", "proto", "state", "attack_cat", "label"])
+    scaler = MinMaxScaler()
+    df_train[numeric_cols] = scaler.fit_transform(df_train[numeric_cols])
+    df_test[numeric_cols] = scaler.transform(df_test[numeric_cols])
+
+    enc = OneHotEncoder(handle_unknown="ignore", sparse_output=False).set_output(transform="pandas")
+    df_train_trans_cats = enc.fit_transform(df_train[["service", "proto", "state"]])
+    df_test_trans_cats = enc.transform(df_test[["service",  "proto", "state"]])
+
+    df_train = pd.concat([df_train, df_train_trans_cats], axis=1).drop(["service", "proto", "state"], axis=1)
+    df_test = pd.concat([df_test, df_test_trans_cats], axis=1).drop(["service", "proto", "state"], axis=1)
+
+    print(df_train["attack_cat"].value_counts())
+
+    enc = OrdinalEncoder(min_frequency=0.05).set_output(transform="pandas")
+    df_train["attack_cat"] = enc.fit_transform(df_train[["attack_cat"]])
+    df_test["attack_cat"] = enc.transform(df_test[["attack_cat"]])
+
+    df_train["attack_cat"] = df_train["attack_cat"].astype(int)
+    df_test["attack_cat"] = df_test["attack_cat"].astype(int)
+
+    df_train = df_train[df_train["attack_cat"] != 6]
+    df_test = df_test[df_test["attack_cat"] != 6]
+
+    print(df_train["attack_cat"].value_counts())
+    print(df_test["attack_cat"].value_counts())
+    print(df_train.shape)
+    print(df_test.shape)
+
+    df_train.drop_duplicates(inplace=True)
+    df_test.drop_duplicates(inplace=True)
+
+    print(df_train["attack_cat"].value_counts())
+    print(df_test["attack_cat"].value_counts())
+    print(df_train.shape)
+    print(df_test.shape)
+
+    df_train_add = df_train[df_train["label"] == 0]
+    df_train = pd.concat([df_train, df_train_add])
+
+    print(df_train["attack_cat"].value_counts())
+    print(df_test["attack_cat"].value_counts())
+    print(df_train.shape)
+    print(df_test.shape)
+
+   #  print(df_train["label"].value_counts())
+
+#    #  X = df_train.columns.difference(["label"])
+#    #  y = "label"
+    
+#    #  sampler = SMOTE(sampling_strategy="minority", random_state=13)
+#    #  df_train[X], df_train[y] = sampler.fit_resample(df_train[X], df_train[y])
+    
+#    #  df_train.dropna(inplace=True)
 
     
-    unique_proto = list(df_train["proto"].unique())
-    [unique_proto.append(proto) for proto in df_test["proto"].unique() if proto not in unique_proto]
-    df_train["proto"] = df_train["proto"].apply(lambda x: unique_proto.index(x))
-    df_test["proto"] = df_test["proto"].apply(lambda x: unique_proto.index(x))
-
-    # print(df_train["proto"].head())
-    # print(df_test["proto"].head())
+#    #  sampler = NearMiss(sampling_strategy='majority') 
+#    #  df_train[X], df_train[y] = sampler.fit_resample(df_train[X], df_train[y])
     
-    unique_state = list(df_train["state"].unique())
-    [unique_state.append(state) for state in df_test["state"].unique() if state not in unique_state]
-    df_train["state"] = df_train["state"].apply(lambda x: unique_state.index(x))
-    df_test["state"] = df_test["state"].apply(lambda x: unique_state.index(x))
 
-    unique_attack_cat = list(df_train["attack_cat"].unique())
-    [unique_attack_cat.append(attack_cat) for attack_cat in df_test["attack_cat"].unique() if attack_cat not in unique_attack_cat]
-    df_train["attack_cat"] = df_train["attack_cat"].apply(lambda x: unique_attack_cat.index(x))
-    df_test["attack_cat"] = df_test["attack_cat"].apply(lambda x: unique_attack_cat.index(x))
+#    #  print(df_train["attack_cat"].value_counts())
+#    #  print(df_train["label"].value_counts())
 
+#     # # print(df_train["label"].value_counts())
+
+#    #  df_train.dropna(inplace=True)
+
+#    #  sampler = SMOTE(sampling_strategy='minority', random_state=13)
+#    #  df_train[X], df_train[y] = sampler.fit_resample(df_train[X], df_train[y])
+    
+#    #  df_train.dropna(inplace=True)
+
+#    #  print(df_train["attack_cat"].value_counts())
+
+
+    df_train = df_train[[c for c in df_train if c not in ['attack_cat', 'label']] 
+       + ['attack_cat', 'label']]
+    df_test = df_test[[c for c in df_test if c not in ['attack_cat', 'label']] 
+       + ['attack_cat', 'label']]
+    
+    
     df_train.to_csv(BASE_DIR / 'UNSW-NB15/data/UNSW_NB15_training-set_cleaned.csv', float_format='%f', index=False)
     df_test.to_csv(BASE_DIR / 'UNSW-NB15/data/UNSW_NB15_testing-set_cleaned.csv', float_format='%f', index=False)
 
