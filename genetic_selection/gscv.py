@@ -18,6 +18,7 @@
 import numbers
 import multiprocess
 import numpy as np
+from scipy.sparse._csr import csr_matrix
 from sklearn.utils import check_X_y
 from sklearn.utils.validation import _check_fit_params
 from sklearn.utils.metaestimators import available_if
@@ -142,9 +143,9 @@ def _evalValidationFunction(
     individual_tuple = tuple(individual)
     if caching and individual_tuple in scores_cache:
         return scores_cache[individual_tuple][0], individual_sum, scores_cache[individual_tuple][1]
-    X_selected, valid_X_selected = X[:, np.array(individual, dtype=bool)], valid_X[:, np.array(individual, dtype=bool)] 
-    fit_params = _check_fit_params(X, fit_params)
-    estimator.fit(X_selected, y, **fit_params)
+    X_selected = X[:, np.array(individual, dtype=bool)]
+    valid_X_selected = valid_X[:, np.array(individual, dtype=bool)]
+    estimator.fit(X_selected, y)
     score = scorer(estimator, valid_X_selected, valid_y)
     if caching:
         scores_cache[individual_tuple] = [score, 0]
@@ -309,7 +310,7 @@ class GeneticSelectionCV(BaseEstimator, MetaEstimatorMixin, SelectorMixin):
     def _estimator_type(self):
         return self.estimator._estimator_type
 
-    def fit(self, X, y, groups=None):
+    def fit(self, X, y, use_validation_set=False, valid_X=None, valid_y=None, groups=None):
         """Fit the GeneticSelectionCV model and the underlying estimator on the selected features.
 
         Parameters
@@ -325,16 +326,13 @@ class GeneticSelectionCV(BaseEstimator, MetaEstimatorMixin, SelectorMixin):
             train/test set. Only used in conjunction with a "Group" `cv`
             instance (e.g., `GroupKFold`).
         """
-        return self._fit(X, y, groups)
-
+        return self._fit(X, y, use_validation_set, valid_X, valid_y, groups)
+    
     def _fit(self, X, y, use_validation_set=False, valid_X=None, valid_y=None, groups=None):
         X, y = check_X_y(X, y, "csr")
         # Initialization
         if use_validation_set:
-            if not (valid_X and valid_y):
-                raise ValueError(
-                    "'valid_X' and 'valid_y' should not be None if 'use_validation_set' flag is on."
-                )
+            valid_X, valid_y = check_X_y(valid_X, valid_y, "csr")
         
         cv = check_cv(self.cv, y, classifier=is_classifier(self.estimator))
         scorer = check_scoring(self.estimator, scoring=self.scoring)
