@@ -19,6 +19,7 @@ import numbers
 import multiprocess
 import numpy as np
 from sklearn.utils import check_X_y
+from sklearn.utils.validation import _check_fit_params
 from sklearn.utils.metaestimators import available_if
 from sklearn.base import BaseEstimator
 from sklearn.base import MetaEstimatorMixin
@@ -131,6 +132,23 @@ def _evalFunction(
     if caching:
         scores_cache[individual_tuple] = [scores_mean, scores_std]
     return scores_mean, individual_sum, scores_std
+
+def _evalValidationFunction(
+    individual, estimator, X, y, valid_X, valid_y, scorer, fit_params, max_features, min_features, caching, scores_cache={}
+):
+    individual_sum = np.sum(individual, axis=0)
+    if individual_sum < min_features or individual_sum > max_features:
+        return -10000, individual_sum, 10000
+    individual_tuple = tuple(individual)
+    if caching and individual_tuple in scores_cache:
+        return scores_cache[individual_tuple][0], individual_sum, scores_cache[individual_tuple][1]
+    X_selected, valid_X_selected = X[:, np.array(individual, dtype=bool)], valid_X[:, np.array(individual, dtype=bool)] 
+    fit_params = _check_fit_params(X, fit_params)
+    estimator.fit(X_selected, y, **fit_params)
+    score = scorer(estimator, valid_X_selected, valid_y)
+    if caching:
+        scores_cache[individual_tuple] = [score, 0]
+    return score, individual_sum, 0
 
 
 def _estimator_has(attr):
@@ -309,9 +327,15 @@ class GeneticSelectionCV(BaseEstimator, MetaEstimatorMixin, SelectorMixin):
         """
         return self._fit(X, y, groups)
 
-    def _fit(self, X, y, groups=None):
+    def _fit(self, X, y, use_validation_set=False, valid_X=None, valid_y=None, groups=None):
         X, y = check_X_y(X, y, "csr")
         # Initialization
+        if use_validation_set:
+            if not (valid_X and valid_y):
+                raise ValueError(
+                    "'valid_X' and 'valid_y' should not be None if 'use_validation_set' flag is on."
+                )
+        
         cv = check_cv(self.cv, y, classifier=is_classifier(self.estimator))
         scorer = check_scoring(self.estimator, scoring=self.scoring)
         n_features = X.shape[1]
@@ -368,21 +392,38 @@ class GeneticSelectionCV(BaseEstimator, MetaEstimatorMixin, SelectorMixin):
             min_features=min_features,
         )
         toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-        toolbox.register(
-            "evaluate",
-            _evalFunction,
-            estimator=estimator,
-            X=X,
-            y=y,
-            groups=groups,
-            cv=cv,
-            scorer=scorer,
-            fit_params=self.fit_params,
-            max_features=max_features,
-            min_features=min_features,
-            caching=self.caching,
-            scores_cache=self.scores_cache,
-        )
+        if use_validation_set:
+            toolbox.register(
+                "evaluate",
+                _evalValidationFunction,
+                estimator=estimator,
+                X=X,
+                y=y,
+                valid_X=valid_X,
+                valid_y=valid_y,
+                scorer=scorer,
+                fit_params=self.fit_params,
+                max_features=max_features,
+                min_features=min_features,
+                caching=self.caching,
+                scores_cache=self.scores_cache,
+            )
+        else:
+            toolbox.register(
+                "evaluate",
+                _evalFunction,
+                estimator=estimator,
+                X=X,
+                y=y,
+                groups=groups,
+                cv=cv,
+                scorer=scorer,
+                fit_params=self.fit_params,
+                max_features=max_features,
+                min_features=min_features,
+                caching=self.caching,
+                scores_cache=self.scores_cache,
+            )
         toolbox.register("mate", tools.cxUniform, indpb=self.crossover_independent_proba)
         toolbox.register("mutate", tools.mutFlipBit, indpb=self.mutation_independent_proba)
         toolbox.register("select", tools.selTournament, tournsize=self.tournament_size)
